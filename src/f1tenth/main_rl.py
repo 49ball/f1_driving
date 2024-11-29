@@ -1,4 +1,5 @@
 # backup
+import os
 from shutil import copyfile
 
 from copy import deepcopy
@@ -24,10 +25,12 @@ from algorithm import algo_dict
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'        # for debug
 EPS = 1e-8
 
-MAPS = ['Sochi', 'Spa', 'Nuerburgring', 'Monza', 'Melbourne', 'Austin', 
-        'Silverstone', 'Sakhir', 'IMS', 'Budapest', 'Montreal', 'Sepang', 
-        'Oschersleben', 'YasMarina', 'MoscowRaceway', 'Zandvoort', 'Catalunya', 
-        'BrandsHatch', 'Shanghai', 'Hockenheim', 'SaoPaulo', 'Spielberg', 'MexicoCity']
+# MAPS = ['Sochi', 'Spa', 'Nuerburgring', 'Monza', 'Melbourne', 'Austin', 
+#         'Silverstone', 'Sakhir', 'IMS', 'Budapest', 'Montreal', 'Sepang', 
+#         'Oschersleben', 'YasMarina', 'MoscowRaceway', 'Zandvoort', 'Catalunya', 
+#         'BrandsHatch', 'Shanghai', 'Hockenheim', 'SaoPaulo', 'Spielberg', 'MexicoCity']
+MAPS = ['YasMarina', 'MoscowRaceway', 'Shanghai', 'MexicoCity', 'Montreal',
+        'Oschersleben', 'YasMarina', 'MoscowRaceway','Melbourne', 'Austin']
 
 EVAL_MAPS = ['Sochi', 'IMS', 'Catalunya', 'Zandvoort', 'Silverstone', 'SaoPaulo',       # easy
              'YasMarina', 'MoscowRaceway', 'Shanghai', 'MexicoCity', 'Montreal']        # hard
@@ -274,7 +277,7 @@ def test(args):
     agent.load(args.model_num)
 
     # test
-    eval(args, test_env, agent, name='test', eval_num=args.eval_num)
+    eval(args, test_env, agent, name='test', eval_num=1)#args.eval_num)
 
 
 if __name__ == "__main__":

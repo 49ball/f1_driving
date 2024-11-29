@@ -96,25 +96,25 @@ class RolloutBuffer:
 
             # get targets & advantages
             # Option 1. Monte Carlo estimate of returns
-            discounted_reward = 0.0
-            reward_targets = np.zeros_like(rewards)
-            for t in reversed(range(len(reward_targets))):
-                discounted_reward = rewards[t] + self.discount_factor*(1.0 - fails[t])*discounted_reward
-                reward_targets[t] = discounted_reward
-            advantages = reward_targets - reward_values
+            # discounted_reward = 0.0
+            # reward_targets = np.zeros_like(rewards)
+            # for t in reversed(range(len(reward_targets))):
+            #     discounted_reward = rewards[t] + self.discount_factor*(1.0 - fails[t])*discounted_reward
+            #     reward_targets[t] = discounted_reward
+            # advantages = reward_targets - reward_values
 
             # # Option 2. 1-step TD
             # reward_targets = rewards + self.discount_factor*(1.0 - fails)*next_reward_values
             # advantages = reward_targets - reward_values
 
             # # Option 3. GAE
-            # reward_delta = 0.0
-            # reward_targets = np.zeros_like(rewards)
-            # for t in reversed(range(len(reward_targets))):
-            #     reward_targets[t] = rewards[t] + self.discount_factor*(1.0 - fails[t])*next_reward_values[t] \
-            #                     + self.discount_factor*(1.0 - dones[t])*reward_delta
-            #     reward_delta = self.gae_coeff*(reward_targets[t] - reward_values[t])
-            # advantages = reward_targets - reward_values
+            reward_delta = 0.0
+            reward_targets = np.zeros_like(rewards)
+            for t in reversed(range(len(reward_targets))):
+                reward_targets[t] = rewards[t] + self.discount_factor*(1.0 - fails[t])*next_reward_values[t] \
+                                + self.discount_factor*(1.0 - dones[t])*reward_delta
+                reward_delta = self.gae_coeff*(reward_targets[t] - reward_values[t])
+            advantages = reward_targets - reward_values
 
             # append
             states_list.append(states)

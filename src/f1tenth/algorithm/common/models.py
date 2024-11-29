@@ -172,7 +172,7 @@ class Critic(nn.Module):
         x = self.activ(self.fc2(x))  # hidden1 -> hidden2 -> activation
         x = self.fc3(x)
         # ============================== #
-        assert x.dim == 2
+        assert x.dim() == 2
         return x
 
     def initialize(self):

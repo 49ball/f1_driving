@@ -15,6 +15,7 @@ from collections import deque
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+import math
 
 EPS = 1e-8
 
@@ -40,12 +41,15 @@ class F1Wrapper(gym.Wrapper):
         self.max_speed = args.max_speed
         self.min_speed = args.min_speed
         self.max_steer = args.max_steer
+        self.noise_mean=0.0
+        self.noise_std=0.01
 
         # for spaces
         self.obs_dim = args.obs_dim
         self.action_dim = args.action_dim
         self.observation_space = spaces.Box(-np.inf*np.ones(self.obs_dim), np.inf*np.ones(self.obs_dim), dtype=np.float32)
         self.action_space = spaces.Box(-np.ones(self.action_dim), np.ones(self.action_dim), dtype=np.float32)
+        self.scan_history = deque(maxlen=3)
 
     def _reset_pose(self, obs_dict):
         # collision
@@ -75,8 +79,7 @@ class F1Wrapper(gym.Wrapper):
         self.yaw = obs_dict['poses_theta'][0]
         self.velocity = np.sqrt(obs_dict['linear_vels_x'][0]**2 + obs_dict['linear_vels_y'][0]**2)
 
-        # print(f"Cartesian Position (x, y): {self.position}")
-        # print(f"Yaw (Cartesian): {self.yaw}")
+        
         poses_s, poses_d, poses_phi = 0, 0, 0
         s, ey, phi = self._env.track.cartesian_to_frenet2(poses_x, poses_y, poses_theta)
         poses_s = s
@@ -93,9 +96,6 @@ class F1Wrapper(gym.Wrapper):
         # frenet coordinate pose
         self.position_frenet = np.stack([poses_s, poses_d]).T
         self.yaw_frenet = poses_phi
-        # print(f"Frenet Position (s, d): {self.position_frenet}")
-        # print(f"Yaw (Frenet): {self.yaw_frenet}")
-        # print(f"Delta s: {self.delta_s}")
 
     def reset(self, **kwargs):
         self.history = deque(maxlen=10)
@@ -104,102 +104,52 @@ class F1Wrapper(gym.Wrapper):
             self._env.unwrapped.add_render_callback(self._env.track.centerline.render_waypoints)
         self._reset_pose(obs_dict)
         obs = self.getObs(obs_dict, reset=True)
+        self.scan_history = deque(maxlen=3)
         info['obs_dict'] = obs_dict
         return obs, info
     
     # ============================ implement here ============================ #
     # TODO
     # You need to implement your own reward function.
-    # def calc_reward(self):        
-    #     # forward reward
-    #     forward_reward = 0.0
-    #     track_reward = 0.0
-    #     collision_cost = 0.0
-
-    #     if self.delta_s > 0:
-    #         forward_reward = 1.0
-    #     else:
-    #         forward_reward = -0.5
-    #     # track reward
-    #     if self.position_frenet[1] == 0:
-    #         track_reward = 1.0
-
-    #     # collison cost
-    #     if self.collision:
-    #         collision_cost = 20.0
-        
-    #     k1,k2,k3 = 1.0, 0.0, 1.0
-    #     # final reward
-    #     reward = k1 * forward_reward + k2 * track_reward - k3 * collision_cost
-    #     print(reward)
-    #     reward_dict = {'forward_reward': forward_reward,
-    #                    'collision_cost': collision_cost,
-    #                    'track_reward': track_reward}
-        
-    #     return reward, reward_dict
-    def calc_reward(self):
-        """
-        Calculate reward based on the vehicle's current state.
-        """
-        # Initialize rewards and penalties
+    def calc_reward(self):        
         forward_reward = 0.0
         track_reward = 0.0
         collision_cost = 0.0
-        speed_reward = 0.0
-        yaw_reward = 0.0
 
-        # Parameters for scaling rewards
-        k_forward = 1.0     # Weight for forward progress
-        k_track = 1.0       # Weight for track alignment
-        k_collision = -10.0 # Penalty for collision
-        k_speed = 0.5       # Weight for maintaining speed
-        k_yaw = 0.5         # Weight for yaw alignment
-
-        # Forward progress reward (based on Frenet delta_s)
-        if self.delta_s > 0:
-            forward_reward = self.delta_s * k_forward
+        # forward reward
+        # forward_reward = self.delta_s
+        # if self.velocity > 1.0:
+        #     # forward_reward = min(self.velocity/2, 1.0)
+        # else:
+        #     forward_reward = -0.2
+        if self.velocity > 0:
+            forward_reward = math.exp(self.velocity) / math.exp(4)
         else:
-            forward_reward = -0.5  # Penalize if moving backward
+            forward_reward = -0.2
 
-        # Track alignment reward (based on Frenet position d)
-        track_deviation = abs(self.position_frenet[1])  # Deviation from center (d)
-        track_reward = max(0, 1 - track_deviation) * k_track  # Higher reward closer to center
+   
 
-        # Collision penalty
+        track_reward = abs(self.position_frenet[1])
+
+
+        # danger_count = np.sum(self.scan < 0.6)
+        # # 리워드 계산
+        # gamma = 0.02  # 위험 영역 패널티 강도
+        # track_reward = -gamma * danger_count
+
+        # collison cost
         if self.collision:
-            collision_cost = k_collision
+            collision_cost = 5.0
+        
+        k1,k2,k3 = 1.0, -0.02, -1.0
+        # final reward
+        reward = k1 * forward_reward + k2 * track_reward + k3 * collision_cost 
+        # print(forward_reward,track_reward, reward)
 
-        # Speed reward (encourage maintaining a target speed, e.g., 10 m/s)
-        target_speed = self.max_speed  # Target speed in m/s
-        current_speed = np.linalg.norm(self.velocity)  # Vehicle speed
-        speed_reward = max(0, 1 - abs(current_speed - target_speed) / target_speed) * k_speed
-
-        # Yaw alignment reward (encourage alignment with road direction)
-        yaw_deviation = abs(self.yaw_frenet)  # Deviation in Frenet yaw
-        yaw_reward = max(0, 1 - yaw_deviation / np.pi) * k_yaw
-
-        # Final reward
-        reward = forward_reward + track_reward + speed_reward + yaw_reward + collision_cost
-
-        # # Print debug information
-        # print(f"Reward Breakdown:")
-        # print(f"  Forward Reward: {forward_reward}")
-        # print(f"  Track Reward: {track_reward}")
-        # print(f"  Speed Reward: {speed_reward}")
-        # print(f"  Yaw Reward: {yaw_reward}")
-        # print(f"  Collision Cost: {collision_cost}")
-        # print(f"  Total Reward: {reward}")
-
-        # Create a detailed reward dictionary
-        reward_dict = {
-            'forward_reward': forward_reward,
-            'track_reward': track_reward,
-            'speed_reward': speed_reward,
-            'yaw_reward': yaw_reward,
-            'collision_cost': collision_cost,
-            'total_reward': reward
-        }
-
+        # print(reward)
+        reward_dict = {'forward_reward': forward_reward,
+                       'collision_cost': collision_cost,
+                       'track_reward': track_reward}
         return reward, reward_dict
     # ======================================================================== #
         
@@ -227,6 +177,51 @@ class F1Wrapper(gym.Wrapper):
     # ============================ implement here ============================ #
     # TODO
     # You need to implement your own observation.
+    # def getObs(self, obs_dict, reset=False):
+    #     '''
+    #         Process LiDAR data and return observation with current and previous scans.
+    #         LiDAR data is downsampled to 20 beams from the front 180-degree section.
+    #     '''
+    #     # LiDAR 스캔 데이터 가져오기
+    #     scan = np.array(obs_dict['scans']).reshape(-1)  # raw lidar value (1080,)
+
+    #     # 전방 180도 (270도 기준 중앙 180도 추출)
+    #     start_index = 180  # 270도 시작
+    #     end_index = 900    # 450도 끝
+    #     front_scan = scan[start_index:end_index]
+
+    #     # 20개 빔으로 축소 (등간격 샘플링)
+    #     num_beams = 20
+    #     beam_indices = np.linspace(0, len(front_scan) - 1, num=num_beams, dtype=int)
+    #     reduced_scan = front_scan[beam_indices]
+
+    #     # 가우시안 노이즈 추가
+    #     noise = np.random.normal(self.noise_mean, self.noise_std, reduced_scan.shape)
+    #     noisy_scan = reduced_scan + noise
+
+    #     # 클리핑 및 정규화
+    #     clipped_scan = np.clip(noisy_scan, 0, 10)  # 0에서 10 사이로 클리핑
+    #     normalized_scan = clipped_scan / 10.0  # 0에서 1 사이로 정규화
+
+    #     # 현재 LiDAR 데이터 저장
+    #     self.scan = normalized_scan
+
+    #     # 초기 상태 처리
+    #     if len(self.scan_history) == 0:
+    #         # 초기 상태: 히스토리를 현재 스캔 데이터로 채움
+    #         self.scan_history.extend([normalized_scan] * 2)  # 총 2개로 히스토리 초기화
+    #     else:
+    #         # 기존 히스토리에 현재 데이터 추가
+    #         self.scan_history.append(normalized_scan)
+
+    #     # 이전 1개 LiDAR 데이터와 현재 데이터 병합 (총 40차원)
+    #     previous_scans = np.concatenate(list(self.scan_history))
+
+    #     # 최종 관측 값 반환
+    #     observation = previous_scans
+    #     return observation
+
+
     def getObs(self, obs_dict, reset=False):
         '''
             Original observation is dictionary with keys:
@@ -243,13 +238,71 @@ class F1Wrapper(gym.Wrapper):
                 'lap_times'     | (num_agents,)
                 'lap_counts'    | (num_agents,)
             
-            ==> Changed to include only scans
+            ==> Changed to include Gaussian noise, clipped, and normalized scans with previous scans
         '''
-        scan = np.array(obs_dict['scans']).reshape(-1)      # raw lidar value
-        observation = scan
+        # LiDAR 스캔 데이터 가져오기
+        scan = np.array(obs_dict['scans']).reshape(-1)  # raw lidar value (1080,)
 
+        # 가우시안 노이즈 추가
+        noise = np.random.normal(self.noise_mean, self.noise_std, scan.shape)  # normal 또는 uniform으로 해보자
+        noisy_scan = scan + noise  # 노이즈가 추가된 스캔 데이터
+
+        # 클리핑 및 정규화
+        clipped_scan = np.clip(noisy_scan, 0, 10)  # 0에서 10 사이로 클리핑
+        normalized_scan = clipped_scan / 10.0  # 0에서 1 사이로 정규화
+
+        # 현재 LiDAR 데이터 저장
+        self.scan = normalized_scan
+
+        # 초기 상태 처리
+        if len(self.scan_history) == 0:
+            # 초기 상태: 히스토리를 현재 스캔 데이터로 채움
+            self.scan_history.extend([normalized_scan] * 3)
+        else:
+            # 기존 히스토리에 현재 데이터 추가
+            self.scan_history.append(normalized_scan)
+
+        # 이전 3개 LiDAR 데이터 병합
+        previous_scans = np.concatenate(list(self.scan_history))
+
+        # 최종 관측 값 반환
+        observation = np.concatenate([normalized_scan, previous_scans])
         return observation
     # ======================================================================== #
+
+    # def getObs(self, obs_dict, reset=False):
+    #     '''
+    #         Original observation is dictionary with keys:
+    #             === key ====     === shape ===
+    #             'ego_idx'       | int
+    #             'scans'         | (num_agents, 1080)
+    #             'poses_x'       | (num_agents,)
+    #             'poses_y'       | (num_agents,)
+    #             'poses_theta'   | (num_agents,)
+    #             'linear_vels_x' | (num_agents,)
+    #             'linear_vels_y' | (num_agents,)
+    #             'ang_vels_z'    | (num_agents,)
+    #             'collisions'    | (num_agents,)
+    #             'lap_times'     | (num_agents,)
+    #             'lap_counts'    | (num_agents,)
+            
+    #         ==> Changed to include Gaussian noise, clipped, and normalized scans
+    #     '''
+    #     # LiDAR 스캔 데이터 가져오기
+    #     scan = np.array(obs_dict['scans']).reshape(-1)  # raw lidar value (1080,)
+
+    #     # 가우시안 노이즈 추가
+    #     noise = np.random.normal(self.noise_mean, self.noise_std, scan.shape)  #normal 또는 uniform으로 해보자
+    #     noisy_scan = scan + noise  # 노이즈가 추가된 스캔 데이터
+
+    #     # 클리핑 및 정규화
+    #     clipped_scan = np.clip(noisy_scan, 0, 10)  # 0에서 10 사이로 클리핑
+    #     normalized_scan = clipped_scan / 10.0  # 0에서 1 사이로 정규화
+    #     self.scan=normalized_scan
+
+    #     observation = normalized_scan
+        
+    #     return observation
 
     def render(self):
         return self._env.render()

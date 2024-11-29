@@ -87,6 +87,7 @@ class Agent(AgentBase):
                 new_action_dists = self.actor(states_tensor) #고칠것
                 new_log_probs_tensor = new_action_dists.log_prob(actions_tensor).sum(axis=-1) #고칠것
 
+
                 prob_ratios_tensor = torch.exp(new_log_probs_tensor - old_log_probs_tensor) #고칠것
                 clipped_ratios_tensor = torch.clamp(prob_ratios_tensor, 1 - self.clip_ratio, 1 + self.clip_ratio) #고칠것
 
@@ -98,7 +99,7 @@ class Agent(AgentBase):
                 entropy = new_action_dists.entropy().mean() #고칠것
 
                 # total loss
-                total_loss = actor_loss + self.critic_coeff*critic_loss - self.ent_coeff*entropy
+                total_loss = actor_loss + self.critic_coeff * critic_loss - self.ent_coeff * entropy
 
                 # update
                 self.optimizer.zero_grad()
@@ -108,8 +109,9 @@ class Agent(AgentBase):
                 self.optimizer.step()
 
             with torch.no_grad():
-                kl = kl_divergence(...)
-                entropy = total_old_action_dists.entropy().mean() #고칠것
+                new_action_dists = self.actor(total_states_tensor)
+                kl = torch.mean(kl_divergence(new_action_dists, total_old_action_dists))  # KL 계산
+                entropy = new_action_dists.entropy().mean()
         # ======================================================================== #
 
             if kl > self.max_kl*self.kl_tolerance: break
